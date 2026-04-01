@@ -31,18 +31,14 @@ With some manual editing for the blue edge.
 <br>
 <br>
 
-#Another example No Editing
+# Another example No Editing
 
 # Oriongal
-<br>
-<br>
-<br>
+
 <img width="613" height="761" alt="image" src="https://github.com/user-attachments/assets/af0f92e9-0d84-474e-a8dc-bc31724aceca" />
 
 
 # Translated
 
 <img width="703" height="752" alt="image" src="https://github.com/user-attachments/assets/962df1f6-c7ad-4ab3-aa0c-416d0d0cf6d8" />
-<br>
-<br>
-<br>
+
