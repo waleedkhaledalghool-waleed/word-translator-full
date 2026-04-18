@@ -142,61 +142,52 @@ def _mirror_tab_stops(tab_stops: list, text_width: int) -> list:
     return [dict(tab) for tab in tab_stops]
 
 
-def _mirror_paragraph(para: dict, text_width: int) -> dict:
-    """Return a new paragraph dict with direction-related fields mirrored."""
+def _mirror_paragraph(para: dict, text_width: int, tgt_is_rtl: bool = True) -> dict:
     p = dict(para)
 
     # Alignment
     if "align" in p:
         p["align"] = _flip_align(p["align"])
 
-    # Indentation: swap left ↔ right.
-    #
-    # w:ind left/right are PHYSICAL page distances in OOXML — they always mean
-    # "distance from the left/right page margin" regardless of bidi direction.
-    # Swapping them mirrors the physical indent, which is exactly what we want:
-    # a clearance gap that was on the right (e.g. for a right-side photo box)
-    # moves to the left (for the now-left photo box).
-    #
-    # HOWEVER: hanging/first-line indent is relative to the paragraph START SIDE.
-    # In a bidi paragraph the start side is the right, so indent_hanging stays
-    # attached to the right — we leave it as-is (no swap needed).
+    # Indentation: swap left ↔ right
     il = p.pop("indent_left",  None)
     ir = p.pop("indent_right", None)
     if il is not None: p["indent_right"] = il
     if ir is not None: p["indent_left"]  = ir
 
-    # Bidi flag: flip
+    # Bidi flag: if the source had an explicit override, flip it;
+    # if not set (paragraph inherited direction from document defaults),
+    # set explicitly to target direction.
     if "bidi" in p:
         p["bidi"] = not p["bidi"]
-    # If no bidi flag was present, after mirror a formerly-LTR doc going RTL
-    # needs bidi=True on every paragraph. We set it here.
-    # (We only do this if there's a "runs" key — i.e. it's a real content para)
-    if "bidi" not in p:
-        p["bidi"] = True   # will be set False again on RTL→LTR by the not above
+    else:
+        p["bidi"] = tgt_is_rtl
+
+    # pmark_fmt.rtl: clear it — the paragraph mark should follow the new direction
+    if "pmark_fmt" in p and "rtl" in p["pmark_fmt"]:
+        p["pmark_fmt"] = dict(p["pmark_fmt"])
+        p["pmark_fmt"]["rtl"] = False   # ← was being left as True (ar original)
 
     # Tab stops
     if "tab_stops" in p:
         p["tab_stops"] = _mirror_tab_stops(p["tab_stops"], text_width)
-    # For bidi paragraphs with no explicit tab stops, Word falls back to its
-    # default 720-twip grid measured from the RIGHT — which may not match the
-    # original layout. Add no implicit stops here; if the original had none,
-    # the bidi default grid will be used (which is usually fine).
 
-    # Runs: flip rtl flag
+    # Runs: DO NOT flip rtl — set it to False unconditionally.
+    # In both Arabic (bidi=True) and English (bidi=False) docs, normal runs
+    # carry rtl=False. The paragraph bidi flag handles base direction.
+    # Flipping False→True was making every English run render RTL.
     if "runs" in p:
         new_runs = []
         for run in p["runs"]:
             r = dict(run)
-            # flip rtl: absent means False
-            r["rtl"] = not r.get("rtl", False)
+            r["rtl"] = False   # ← was: not r.get("rtl", False)
             new_runs.append(r)
         p["runs"] = new_runs
 
     return p
 
 
-def _mirror_table(table: dict, text_width: int) -> dict:
+def _mirror_table(table: dict, text_width: int, tgt_is_rtl: bool = True) -> dict:
     """Mirror a table: reverse column order per row."""
     t = dict(table)
 
@@ -212,25 +203,25 @@ def _mirror_table(table: dict, text_width: int) -> dict:
         new_row = dict(row)
         if "cells" in row:
             new_row["cells"] = list(reversed([
-                _mirror_cell(cell, text_width) for cell in row["cells"]
+                _mirror_cell(cell, text_width, tgt_is_rtl) for cell in row["cells"]
             ]))
         new_rows.append(new_row)
     t["rows"] = new_rows
     return t
 
 
-def _mirror_cell(cell: dict, text_width: int) -> dict:
+def _mirror_cell(cell: dict, text_width: int, tgt_is_rtl: bool = True) -> dict:
     """Mirror cell contents (paragraph alignment/direction)."""
     c = dict(cell)
     if "paragraphs" in c:
         c["paragraphs"] = [
-            _mirror_element(p, text_width) for p in c["paragraphs"]
+            _mirror_element(p, text_width, tgt_is_rtl=tgt_is_rtl) for p in c["paragraphs"]
         ]
     return c
 
 
 def _mirror_textbox(tb: dict, text_width: int, page_width: int,
-                    margin_left: int, margin_right: int) -> dict:
+                    margin_left: int, margin_right: int, tgt_is_rtl: bool = True) -> dict:
     """
     Mirror a textbox/floating element horizontally.
 
@@ -271,7 +262,7 @@ def _mirror_textbox(tb: dict, text_width: int, page_width: int,
     # Mirror paragraphs inside the textbox (alignment + run direction)
     if "paragraphs" in t:
         t["paragraphs"] = [
-            _mirror_element(p, text_width) for p in t["paragraphs"]
+            _mirror_element(p, text_width, tgt_is_rtl=tgt_is_rtl) for p in t["paragraphs"]
         ]
 
     return t
@@ -279,18 +270,19 @@ def _mirror_textbox(tb: dict, text_width: int, page_width: int,
 
 def _mirror_element(el: dict, text_width: int,
                     page_width: int = 0,
-                    margin_left: int = 0, margin_right: int = 0) -> dict:
+                    margin_left: int = 0, margin_right: int = 0,
+                    tgt_is_rtl: bool = True) -> dict:
     """Dispatch mirroring to the right handler based on element type."""
     etype = el.get("type", "")
 
     if etype in ("paragraph", "empty_paragraph"):
-        return _mirror_paragraph(el, text_width)
+        return _mirror_paragraph(el, text_width, tgt_is_rtl)
 
     elif etype == "table":
-        return _mirror_table(el, text_width)
+        return _mirror_table(el, text_width, tgt_is_rtl)
 
     elif etype == "textbox":
-        return _mirror_textbox(el, text_width, page_width, margin_left, margin_right)
+        return _mirror_textbox(el, text_width, page_width, margin_left, margin_right, tgt_is_rtl)
 
     else:
         # image, unknown — return as-is
@@ -447,9 +439,10 @@ def mirror_document(
     y_delta = _calc_textbox_y_delta(elements_orig)
 
     # ── Elements ──────────────────────────────────────────────────────────────
+    tgt_is_rtl = _is_rtl(tgt_lang)
     mirrored_elements = []
     for el in elements_orig:
-        mel = _mirror_element(el, tw, pw, ml, mr)
+        mel = _mirror_element(el, tw, pw, ml, mr, tgt_is_rtl)
         # Apply Y correction to page/margin-anchored textboxes
         if mel.get("type") == "textbox" and y_delta != 0:
             v_anchor = mel.get("pos_v_anchor", "page")

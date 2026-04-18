@@ -247,12 +247,13 @@ def _apply_paragraph_fmt(para, pdata, defaults=None):
         if cfg.get("after_autospacing"):
             sp_el.set(qn("w:afterAutospacing"), "1")
 
-    if cfg.get("bidi"):
-        pPr = para._p.get_or_add_pPr()
-        bidi_el = OxmlElement("w:bidi")
-        for old in pPr.findall(qn("w:bidi")):
-            pPr.remove(old)
-        pPr.append(bidi_el)
+    pPr = para._p.get_or_add_pPr()
+    for old in pPr.findall(qn("w:bidi")):
+        pPr.remove(old)
+    bidi_el = OxmlElement("w:bidi")
+    if not cfg.get("bidi"):
+        bidi_el.set(qn("w:val"), "0")   # explicit LTR — overrides any inherited RTL
+    pPr.append(bidi_el)
 
     pmark = cfg.get("pmark_fmt", {})
     if pmark:

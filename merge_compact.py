@@ -181,11 +181,27 @@ def merge_and_diff(
     # ── Apply new texts & collect diffs ───────────────────────────────────────
     diffs: list[tuple[int, str, str]] = []      # (index, old, new)
 
+    skip     = compact.get("skip",     [False] * len(new_texts))
+    prefixes = compact.get("prefixes", [""]    * len(new_texts))
+    suffixes = compact.get("suffixes", [""]    * len(new_texts))
+
     for i, (run, new_text) in enumerate(zip(run_refs, new_texts)):
         old_text = orig_texts[i]
-        run["text"] = new_text
-        if new_text != old_text:
-            diffs.append((i, old_text, new_text))
+        if skip[i]:
+            run["text"] = new_text              # structural run: restore verbatim
+        else:
+            run["text"] = prefixes[i] + new_text + suffixes[i]
+        if run["text"] != old_text:
+            diffs.append((i, old_text, run["text"]))
+
+    # Second pass: migrate suffixes into the next structural run so tab
+    # characters share the structural run's font metrics (prevents wrong widths)
+    for i in range(len(run_refs) - 1):
+        if skip[i] or not suffixes[i]:
+            continue
+        if skip[i + 1]:
+            run_refs[i]["text"]     = prefixes[i] + new_texts[i]
+            run_refs[i + 1]["text"] = suffixes[i] + run_refs[i + 1]["text"]
 
     # Regenerate paragraph.text fields
     _regen_paragraph_texts(merged_data)
